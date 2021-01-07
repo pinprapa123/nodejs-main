@@ -6,7 +6,8 @@ let mysql = require('mysql');
 const jwt = require("jsonwebtoken");
 const cors = require("cors")
 const bcrypt = require("bcrypt");
-const session = require("express-session");
+const saltRounds = 10
+
 
 app.use(cors());
 app.use(express.json());
@@ -25,7 +26,7 @@ app.get('/', (req, res) => {
 var token;
  console.log(token); //undefined is key for us
 // connection to mysql database
-let dbCon = mysql.createConnection({
+const dbCon = mysql.createConnection({
     host: '127.0.0.1',
     port: 3310,
     user: 'root',
@@ -35,36 +36,80 @@ let dbCon = mysql.createConnection({
 })
 dbCon.connect();
 
-app.post('/login' , async (req,res) => { //verify
-    //check if user exist or not
+// Register
+app.post('/register' ,(req, res) => {
+    const first_name = req.body.first_name;
+    const email = req.body.email;
+    const password = req.body.password;
+    const phone = req.body.phone
+
+     dbCon.query('SELECT email FROM users WHERE email = ?' , [email] ,async (error,results) => {
+        if(error) {
+            console.log(error);
+        }
+        if( results.length > 0 ) {
+            return res.json({
+                message: "อีเมลนี้ถูกใช้งานไปแล้ว",
+                Data : results
+            })
+        }
+        const hashedPassword = await bcrypt.hash(password, 8);
+        bcrypt.hash(password, saltRounds, (err, hash) => {
+
+    if (!first_name || !email || !password || !phone) {
+        return res.status(400).send({ error: true, message: "กรุณากรอกข้อมูลให้ครบถ้วน"});
+    } else {
+        dbCon.query('INSERT INTO users SET ?', {first_name: first_name, email: email, password: hashedPassword, phone: phone}, (error, results) => {
+            if (error){
+                console.log(error);
+            } else{
+            return res.json({
+                message: "สมัครสมาชิกสำเร็จ",
+                Data : results
+                
+               })
+            
+            }
+        })
+    }
+    })
+    })
+});
+
+// Login
+app.post('/login' , async (req,res) => { 
+    
     const email = req.body.email;
     const password = req.body.password
 
-   dbCon.query('SELECT * FROM users WHERE email = ? AND password = ? ' , [email, password], (err, result) => {
+   dbCon.query('SELECT * FROM users WHERE email = ? ' , email, (err, result) => {
     
        if (err) {
         res.send({err: err});
         
        } 
        if (result.length > 0) {
-        token = jwt.sign({email , password} , process.env.ACESS_TOKEN); //generate token
-       return res.json({
-        message: "เข้าสู่ระบบสำเร็จ",
-        Data : result,
-        token: token
-        
+           bcrypt.compare(password, result[0].password,(error, response) => {
+               if (response) {
+                   token = jwt.sign({email , password} , process.env.ACESS_TOKEN); //generate token
+                    return res.json({
+                    message: "เข้าสู่ระบบสำเร็จ",
+                    Data : result,
+                    token: token
        })
-        // res.send(token);
-        // console.log(token);
-      
+               } else {
+                res.send({message: "รหัสผ่านไม่ถูกต้อง"});
+               }
+           })
+        
        }else{
-           res.send({message: "อีเมล์หรือรหัสผ่านไม่ถูกต้อง"})
+           res.send({message: "ไม่พบบัญชีผู้ใช้นี้"});
        }         
     })
     
 });
 
-// retrieve all
+// Retrieve all
 app.get('/users', auth , (req, res) => {
     dbCon.query('SELECT * FROM users', (error, results, fields) => {
         if (error) throw error;
@@ -79,30 +124,7 @@ app.get('/users', auth , (req, res) => {
     })
 })
 
-// add
-app.post('/register' ,(req, res) => {
-    let first_name = req.body.first_name;
-    let email = req.body.email;
-    let password = req.body.password;
-    let phone = req.body.phone
-
-    // validation
-    if (!first_name || !email || !password || !phone) {
-        return res.status(400).send({ error: true, message: "โปรดกรอกข้อมูลให้ครบถ้วน"});
-    } else {
-        dbCon.query('INSERT INTO users (first_name, email, password, phone) VALUES(?, ?, ?, ?)', [first_name, email, password, phone], (error, results, fields) => {
-            if (error) throw error;
-            return res.json({
-                message: "สมัครสมาชิกสำเร็จ",
-                Data : results
-                
-               })
-            // send({ error: false , message: "สมัครสมาชิกสำเร็จ"})
-        })
-    }
-});
-
-// retrieve by id 
+// Retrieve by id 
 app.get('/user/:id', auth , (req, res) => {
     let id = req.params.id;
 
@@ -124,12 +146,12 @@ app.get('/user/:id', auth , (req, res) => {
     }
 })
 
-// update 
+// Update 
 app.put('/user', auth , (req, res) => {
-    let id = req.body.id;
-    let first_name = req.body.first_name;
-    let email = req.body.email;
-    let phone = req.body.phone;
+    const id = req.body.id;
+    const first_name = req.body.first_name;
+    const email = req.body.email;
+    const phone = req.body.phone;
 
     // validation
     if (!id || !first_name || !email|| !phone) {
@@ -150,9 +172,9 @@ app.put('/user', auth , (req, res) => {
     }
 })
 
-// delete by id
+// Delete by id
 app.delete('/user', auth , (req, res) => {
-    let id = req.body.id;
+    const id = req.body.id;
 
     if (!id) {
         return res.status(400).send({ error: true, message: "Please provide book id"});
@@ -172,7 +194,8 @@ app.delete('/user', auth , (req, res) => {
     }
 })
 
-app.post('/logout',(req,res)=>{ //logout
+// Logout
+app.post('/logout',(req,res)=>{ 
     token = undefined; //value undefined
     res.send("logout");
  });
@@ -187,11 +210,7 @@ app.post('/logout',(req,res)=>{ //logout
       }else{
             return res.status(404).send("คุณต้องทำการเข้าสู่ระบบก่อนค่ะ");
       }
- }app.post('/logout',(req,res)=>{ //logout
-    token = undefined; //value undefined
-    res.send("logout");
- });
- 
+ }
 
  const PORT = process.env.PORT || 3000;
  app.listen(PORT,()=>{
